@@ -1,6 +1,8 @@
 import { createLoop } from './loop.js';
 import { createInput } from './input.js';
-import { integrate } from './physics.js';
+import { World } from './world.js';
+import { Ship, Asteroid, Pickup } from './entities.js';
+import { Vector2 } from './vector2.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -17,36 +19,33 @@ canvas.width = width * dpr;
 canvas.height = height * dpr;
 canvas.style.width = `${width}px`;
 canvas.style.height = `${height}px`;
-
 ctx.scale(dpr, dpr);
 
-let ship = { x: width / 2, y: height / 2, vx: 0, vy: 0, angle: 0 };
-const input = createInput();
+const world = new World(width, height);
+const ship = new Ship(new Vector2(width / 2, height / 2));
+world.spawn(ship);
+
+world.spawn(new Asteroid(new Vector2(100, 100), new Vector2(30, 20)));
+world.spawn(new Asteroid(new Vector2(600, 400), new Vector2(-20, 40)));
+world.spawn(new Pickup(new Vector2(400, 200)));
+
+const input = createInput(() => {
+  ship.fire(world);
+});
 
 function update(dt) {
-  ship = integrate(ship, input.getState(), dt, width, height);
+  world.step(dt, input.getState());
 }
 
 function render() {
   ctx.clearRect(0, 0, width, height);
+  world.render(ctx);
 
-  ctx.save();
-  ctx.translate(ship.x, ship.y);
-  ctx.rotate(ship.angle);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '16px sans-serif';
+  ctx.fillText(`HP: ${ship.hp}`, 10, 25);
+  ctx.fillText(`Score: ${world.score}`, 10, 45);
 
-  
-  ctx.beginPath();
-  ctx.moveTo(15, 0);
-  ctx.lineTo(-10, -8);
-  ctx.lineTo(-10, 8);
-  ctx.closePath();
-  ctx.strokeStyle = '#38bdf8';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.restore();
-
-  
   const stats = gameLoop.getStats();
   stepsEl.textContent = stats.stepsPerSecond;
   fpsEl.textContent = stats.framesPerSecond;
