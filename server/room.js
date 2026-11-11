@@ -1,115 +1,108 @@
 import { EventEmitter } from 'events';
-import { config } from './config.js';
-import { MatchLogger } from './logger.js';
+import { createShipState, updateShip } from '../shared/physics.js';
+import { encodeSnapshot, decodeInput, MSG_INPUT } from '../shared/protocol.js';
 
 export class Room extends EventEmitter {
-  constructor(id, name) {
+  constructor(id, options = {}) {
     super();
     this.id = id;
-    this.name = name;
+    this.maxPlayers = options.maxPlayers || 4;
     this.clients = new Map();
-    this.logger = new MatchLogger(id);
+    this.players = new Map();
+    this.lastProcessedSeq = new Map();
+    this.nextPlayerId = 1;
 
-    this.on('error', (err) => {
-      console.error(`[Room Error] Room ${this.id}:`, err);
-    });
+    this.tickRate = 30;
+    this.dt = 1 / this.tickRate;
+    this.intervalId = setInterval(() => this.tick(), 1000 / this.tickRate);
   }
 
-  addClient(ws, clientInfo) {
-    this.clients.set(ws, {
-      ...clientInfo,
-      rateLimit: []
-    });
+  addClient(ws, name) {
+    if (this.clients.size >= this.maxPlayers) {
+      ws.close(4001, 'Room is full');
+      return false;
+    }
 
-    this.broadcast({
-      type: 'user_joined',
-      sender: 'System',
-      text: `${clientInfo.name} приєднався до кімнати`
-    });
+    const playerId = this.nextPlayerId++;
+    const ship = createShipState(playerId, 100 + playerId * 50, 100 + playerId * 50);
 
-    this.logger.log({ type: 'join', userId: clientInfo.id, userName: clientInfo.name });
+    this.clients.set(ws, { id: playerId, name });
+    this.players.set(playerId, ship);
+    this.lastProcessedSeq.set(playerId, 0);
+
+    ws.on('message', (message, isBinary) => this.handleMessage(ws, message, isBinary));
+
+    this.emit('user_joined', { playerId, name });
+    return true;
   }
 
   removeClient(ws) {
     const client = this.clients.get(ws);
-    if (client) {
-      this.clients.delete(ws);
-      this.broadcast({
-        type: 'user_left',
-        sender: 'System',
-        text: `${client.name} залишив кімнату`
-      });
-      this.logger.log({ type: 'leave', userId: client.id });
-    }
+    if (!client) return;
+
+    this.clients.delete(ws);
+    this.players.delete(client.id);
+    this.lastProcessedSeq.delete(client.id);
+
+    this.emit('user_left', { playerId: client.id, name: client.name });
 
     if (this.clients.size === 0) {
-      this.logger.close();
-      this.emit('empty', this.id);
+      this.close();
     }
   }
 
-  handleMessage(ws, rawMessage) {
-    if (Buffer.byteLength(rawMessage) > config.maxMessageSize) {
-      ws.close(1009, 'Message too big');
-      return;
-    }
-
-    let parsed;
-    try {
-      parsed = JSON.parse(rawMessage.toString());
-    } catch {
-      ws.close(1007, 'Invalid JSON format');
-      return;
-    }
-
-    if (!parsed || typeof parsed !== 'object' || !parsed.type) {
-      ws.close(1008, 'Invalid message structure');
-      return;
-    }
-
+  handleMessage(ws, message, isBinary) {
     const client = this.clients.get(ws);
     if (!client) return;
 
-    const now = Date.now();
-    client.rateLimit = client.rateLimit.filter((t) => now - t < config.rateLimitWindow);
-    if (client.rateLimit.length >= config.rateLimitCount) {
-      ws.close(1008, 'Rate limit exceeded');
-      return;
-    }
-    client.rateLimit.push(now);
+    if (isBinary || message instanceof ArrayBuffer || Buffer.isBuffer(message)) {
+      const buffer = message.buffer ? message.buffer.slice(message.byteOffset, message.byteOffset + message.byteLength) : message;
+      const data = decodeInput(buffer);
 
-    switch (parsed.type) {
-      case 'chat':
-        if (typeof parsed.text !== 'string') {
-          ws.close(1008, 'Chat text must be a string');
-          return;
+      if (data.type === MSG_INPUT) {
+        const ship = this.players.get(client.id);
+        if (ship) {
+          updateShip(ship, data, this.dt);
+          this.lastProcessedSeq.set(client.id, data.seq);
         }
-        const chatMsg = {
-          type: 'chat',
-          sender: client.name,
-          text: parsed.text,
-          timestamp: now
-        };
-        this.broadcast(chatMsg);
-        this.logger.log(chatMsg);
-        break;
-
-      default:
-        ws.close(1008, `Unknown message type: ${parsed.type}`);
-        break;
+      }
+    } else {
+      try {
+        const payload = JSON.parse(message.toString());
+        if (payload.type === 'chat') {
+          this.broadcast(JSON.stringify({
+            type: 'chat',
+            sender: client.name,
+            text: payload.text,
+            timestamp: Date.now()
+          }));
+        }
+      } catch (e) {}
     }
   }
 
-  broadcast(data) {
-    const payload = JSON.stringify(data);
-    for (const [ws] of this.clients.entries()) {
-      if (ws.readyState === ws.OPEN) {
-        if (ws.bufferedAmount > 64 * 1024) {
-          console.warn('Skipping send due to high bufferedAmount');
-          continue;
-        }
-        ws.send(payload);
+  tick() {
+    const playerArray = Array.from(this.players.values());
+
+    for (const [ws, client] of this.clients.entries()) {
+      const lastSeq = this.lastProcessedSeq.get(client.id) || 0;
+      const snapshotBuffer = encodeSnapshot(lastSeq, playerArray);
+      if (ws.readyState === 1) {
+        ws.send(snapshotBuffer, { binary: true });
       }
     }
+  }
+
+  broadcast(message) {
+    for (const [ws] of this.clients.entries()) {
+      if (ws.readyState === 1) {
+        ws.send(message);
+      }
+    }
+  }
+
+  close() {
+    clearInterval(this.intervalId);
+    this.emit('close');
   }
 }
