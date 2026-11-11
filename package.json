@@ -1,15 +1,14 @@
 {
-  "name": "game-lab4",
+  "name": "game",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
     "start": "node server/server.js",
-    "dev": "vite"
-  },
-  "dependencies": {
-    "ws": "^8.22.2"
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "vite": "^5.0.0"
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "zod": "^3.0.0"
   }
 }
