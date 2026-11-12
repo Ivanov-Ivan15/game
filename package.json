@@ -4,11 +4,24 @@
   "type": "module",
   "scripts": {
     "start": "node server/server.js",
-    "typecheck": "tsc --noEmit"
+    "build": "node -e \"import('esbuild').then(async es => { await es.build({ entryPoints: ['src/main.ts'], bundle: true, format: 'esm', outfile: 'dist/main.js' }); await es.build({ entryPoints: ['shared/physics.ts', 'shared/protocol.ts'], bundle: false, format: 'esm', outdir: 'shared' }); })\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^26.6.6",
+    "@vitest/coverage-v8": "^5.1.0",
+    "esbuild": "^0.28.2",
+    "fast-check": "^4.10.2",
     "typescript": "^5.0.0",
+    "vitest": "^5.1.0",
     "zod": "^3.0.0"
   }
 }

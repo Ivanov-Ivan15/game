@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lab 1 - Event Loop & Game Loop</title>
+  <title>Lab 7 - Multiplayer Space Game</title>
   <style>
     body {
       margin: 0;
@@ -15,20 +15,61 @@
       align-items: center;
       justify-content: center;
       min-height: 100vh;
+      gap: 10px;
     }
     #hud {
-      margin-bottom: 10px;
-      font-size: 16px;
+      font-size: 15px;
     }
     canvas {
       border: 2px solid #38bdf8;
       background: #000;
     }
+    #chat-box {
+      width: 800px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    #chat-messages {
+      height: 90px;
+      overflow-y: auto;
+      margin-bottom: 6px;
+      font-size: 13px;
+    }
+    #chat-form {
+      display: flex;
+      gap: 6px;
+    }
+    #chat-input {
+      flex: 1;
+      padding: 6px;
+      background: #0f172a;
+      color: #f8fafc;
+      border: 1px solid #475569;
+    }
+    button {
+      padding: 6px 14px;
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      font-weight: bold;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <div id="hud">Steps: <span id="steps">0</span> | FPS: <span id="fps">0</span> | Frame Time: <span id="ft">0</span>ms</div>
-  <canvas id="gameCanvas"></canvas>
-  <script type="module" src="/src/main.js"></script>
+  <div id="hud">
+    Room: <span id="room-label">room1</span> | Players: <span id="players-count">1</span> | FPS: <span id="fps">60</span>
+  </div>
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  <div id="chat-box">
+    <div id="chat-messages"></div>
+    <form id="chat-form">
+      <input id="chat-input" type="text" placeholder="Введіть повідомлення..." autocomplete="off" />
+      <button id="chat-send" type="submit">Надіслати</button>
+    </form>
+  </div>
+  <script type="module" src="/dist/main.js"></script>
 </body>
 </html>

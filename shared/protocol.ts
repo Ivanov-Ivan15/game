@@ -1,22 +1,14 @@
 import { z } from 'zod';
-import { PlayerId, SequenceNumber } from './physics.js';
+import { PlayerId } from './physics.js';
 
 export const PROTOCOL_VERSION = 1;
 export const MSG_INPUT = 1;
 export const MSG_SNAPSHOT = 2;
 
-export const ChatMessageSchema = z.object({
-  type: z.literal('chat'),
-  text: z.string().min(1).max(200),
-  sender: z.string().optional()
-});
-
-export type ChatMessage = z.infer<typeof ChatMessageSchema>;
-
 export interface DecodedInput {
   readonly version: number;
   readonly type: number;
-  readonly seq: SequenceNumber;
+  readonly seq: number;
   readonly thrust: boolean;
   readonly left: boolean;
   readonly right: boolean;
@@ -33,98 +25,140 @@ export interface SnapshotPlayer {
 export interface DecodedSnapshot {
   readonly version: number;
   readonly type: number;
-  readonly lastProcessedSeq: SequenceNumber;
+  readonly lastProcessedSeq: number;
   readonly players: readonly SnapshotPlayer[];
 }
 
-export function encodeInput(seq: number, thrust: boolean, left: boolean, right: boolean, fire: boolean): ArrayBuffer {
+export const ChatMessageSchema = z.object({
+  type: z.literal('chat'),
+  text: z.string().min(1).max(200)
+});
+
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+export function parseChatMessage(raw: string): ChatMessage | null {
+  try {
+    const parsed = JSON.parse(raw);
+    const result = ChatMessageSchema.safeParse(parsed);
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+}
+
+export function encodeInput(
+  seq: number,
+  thrust: boolean,
+  left: boolean,
+  right: boolean,
+  fire: boolean
+): ArrayBuffer {
   const buffer = new ArrayBuffer(7);
   const view = new DataView(buffer);
-  
+
   view.setUint8(0, PROTOCOL_VERSION);
   view.setUint8(1, MSG_INPUT);
-  view.setUint32(2, seq, true);
-  
+  view.setUint32(2, seq >>> 0, false);
+
   let flags = 0;
-  if (thrust) flags |= 1;
-  if (left) flags |= 2;
-  if (right) flags |= 4;
-  if (fire) flags |= 8;
+  if (thrust) flags |= 1 << 0;
+  if (left) flags |= 1 << 1;
+  if (right) flags |= 1 << 2;
+  if (fire) flags |= 1 << 3;
   view.setUint8(6, flags);
 
   return buffer;
 }
 
 export function decodeInput(buffer: ArrayBuffer): DecodedInput {
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength !== 7) {
+    throw new Error(`Malformed input buffer: expected 7 bytes, got ${buffer?.byteLength ?? 'invalid'}`);
+  }
+
   const view = new DataView(buffer);
   const version = view.getUint8(0);
   const type = view.getUint8(1);
-  const seq = view.getUint32(2, true) as SequenceNumber;
+
+  if (version !== PROTOCOL_VERSION || type !== MSG_INPUT) {
+    throw new Error(`Invalid input header: version=${version}, type=${type}`);
+  }
+
+  const seq = view.getUint32(2, false);
   const flags = view.getUint8(6);
 
   return {
     version,
     type,
     seq,
-    thrust: !!(flags & 1),
-    left: !!(flags & 2),
-    right: !!(flags & 4),
-    fire: !!(flags & 8)
+    thrust: (flags & (1 << 0)) !== 0,
+    left: (flags & (1 << 1)) !== 0,
+    right: (flags & (1 << 2)) !== 0,
+    fire: (flags & (1 << 3)) !== 0
   };
 }
 
-export function encodeSnapshot(lastProcessedSeq: number, players: readonly SnapshotPlayer[]): ArrayBuffer {
-  const bufferLength = 8 + players.length * 12;
-  const buffer = new ArrayBuffer(bufferLength);
+export function encodeSnapshot(
+  lastProcessedSeq: number,
+  players: readonly SnapshotPlayer[]
+): ArrayBuffer {
+  const headerSize = 8;
+  const playerStride = 12;
+  const buffer = new ArrayBuffer(headerSize + players.length * playerStride);
   const view = new DataView(buffer);
 
   view.setUint8(0, PROTOCOL_VERSION);
   view.setUint8(1, MSG_SNAPSHOT);
-  view.setUint32(2, lastProcessedSeq, true);
-  view.setUint16(6, players.length, true);
+  view.setUint32(2, lastProcessedSeq >>> 0, false);
+  view.setUint16(6, players.length, false);
 
-  let offset = 8;
-  for (const p of players) {
-    view.setUint16(offset, p.id, true);
-    view.setFloat32(offset + 2, p.x, true);
-    view.setFloat32(offset + 6, p.y, true);
-    const angleInt16 = Math.round((p.angle / (2 * Math.PI)) * 32767);
-    view.setInt16(offset + 10, angleInt16, true);
-    offset += 12;
+  let offset = headerSize;
+  for (const player of players) {
+    view.setUint16(offset, player.id, false);
+    view.setFloat32(offset + 2, player.x, false);
+    view.setFloat32(offset + 6, player.y, false);
+    const quantizedAngle = Math.round((player.angle / Math.PI) * 32767);
+    const clampedAngle = Math.max(-32768, Math.min(32767, quantizedAngle));
+    view.setInt16(offset + 10, clampedAngle, false);
+    offset += playerStride;
   }
 
   return buffer;
 }
 
 export function decodeSnapshot(buffer: ArrayBuffer): DecodedSnapshot {
+  if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 8) {
+    throw new Error(`Malformed snapshot buffer: too short (${buffer?.byteLength ?? 'invalid'} bytes)`);
+  }
+
   const view = new DataView(buffer);
   const version = view.getUint8(0);
   const type = view.getUint8(1);
-  const lastProcessedSeq = view.getUint32(2, true) as SequenceNumber;
-  const playerCount = view.getUint16(6, true);
+
+  if (version !== PROTOCOL_VERSION || type !== MSG_SNAPSHOT) {
+    throw new Error(`Invalid snapshot header: version=${version}, type=${type}`);
+  }
+
+  const lastProcessedSeq = view.getUint32(2, false);
+  const count = view.getUint16(6, false);
+
+  const expectedLength = 8 + count * 12;
+  if (buffer.byteLength !== expectedLength) {
+    throw new Error(`Malformed snapshot buffer: expected ${expectedLength} bytes, got ${buffer.byteLength}`);
+  }
 
   const players: SnapshotPlayer[] = [];
   let offset = 8;
-  for (let i = 0; i < playerCount; i++) {
-    const id = view.getUint16(offset, true) as PlayerId;
-    const x = view.getFloat32(offset + 2, true);
-    const y = view.getFloat32(offset + 6, true);
-    const angleInt16 = view.getInt16(offset + 10, true);
-    const angle = (angleInt16 / 32767) * (2 * Math.PI);
+
+  for (let i = 0; i < count; i++) {
+    const id = view.getUint16(offset, false) as PlayerId;
+    const x = view.getFloat32(offset + 2, false);
+    const y = view.getFloat32(offset + 6, false);
+    const rawAngle = view.getInt16(offset + 10, false);
+    const angle = (rawAngle / 32767) * Math.PI;
 
     players.push({ id, x, y, angle });
     offset += 12;
   }
 
   return { version, type, lastProcessedSeq, players };
-}
-
-export function parseChatMessage(jsonString: string): ChatMessage | null {
-  try {
-    const parsed: unknown = JSON.parse(jsonString);
-    const result = ChatMessageSchema.safeParse(parsed);
-    return result.success ? result.data : null;
-  } catch {
-    return null;
-  }
 }
