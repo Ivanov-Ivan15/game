@@ -117,7 +117,7 @@ Promise.resolve()
 
 Запуск та перевірка
 
-1. Встановлення залежностей
+ 1. Встановлення залежностей
 ```bash
 npm install
 
@@ -175,3 +175,82 @@ npm start
 
 ```bash
 npx tsc --noEmit
+
+Лабораторна робота №7: V8, пам'ять і тести (Multiplayer Space Shooter)
+
+![CI](https://github.com/<USERNAME>/<REPO>/actions/workflows/ci.yml/badge.svg)
+
+Багатокористувацька браузерна гра реального часу на базі WebSocket, бінарного протоколу (`ArrayBuffer` / `DataView`), клієнтського передбачення (Client-Side Prediction & Server Reconciliation) та оптимізованого рушія симуляції.
+
+---
+
+1. Архітектура та тести
+
+* **`shared/`** — детермінована фізика (`physics.ts`: векторна математика, інтегрування руху, колізії, межі арени) та бінарний кодек (`protocol.ts`: кодування/декодування пакетів керування й знімків світу, валідація повідомлень чату).
+* **`server/`** — авторитетний ігровий сервер (`server.js`, `room.js`) з тікрейтом 30 Гц (`dt = 33.33 мс`), обмеженням частоти повідомлень (`maxMsgsPerSec`), просторовим хешуванням колізій (Spatial Hash Grid) та автоматичним очищенням порожніх кімнат.
+* **`src/`** — клієнтський застосунок (`main.ts`, `prediction.ts`) з пулом об'єктів для куль і частинок, уникненням алокацій у гарячому циклі та рендерингом на Canvas.
+* **`tests/` & `e2e/`** — 64 тести на **Vitest** та **fast-check** (покриття `shared/` становить **98.23%**, при вимозі ≥ 85%) і наскрізний E2E-тест на **Playwright** (синхронізація руху та чату між двома ізольованими браузерами в одній кімнаті).
+
+### Запуск проєкту та тестів
+
+```bash
+Встановлення залежностей
+npm install
+
+Запуск гри локально (http://localhost:3000)
+npm start
+
+Юніт-, інтеграційні та property-based тести (64 тести)
+npm test
+
+Звіт про покриття коду (V8 Coverage)
+npm run test:coverage
+
+E2E-тести у двох браузерах (Playwright)
+npm run test:e2e
+
+Лаб 8. Публікуємо гру: Docker, метрики і жива адреса
+# Multiplayer Space Shooter
+
+![CI](https://github.com/ivanov-ivan15/game/actions/workflows/ci.yml/badge.svg)
+![Docker GHCR](https://github.com/ivanov-ivan15/game/actions/workflows/docker.yml/badge.svg)
+
+Браузерна багатокористувацька гра в реальному часі з авторитетним сервером на WebSocket (`wss://`), бінарним мережевим протоколом, клієнтським передбаченням руху (Client-Side Prediction & Server Reconciliation) та підтримкою встановлення на смартфон (PWA).
+
+* **Жива адреса гри:** `https://<YOUR-DEPLOY-URL>` (WebSocket: `wss://<YOUR-DEPLOY-URL>/ws`)
+* **Відео-демонстрація (3–5 хв):** `https://<YOUR-VIDEO-LINK>`[cite: 5]
+* **RTT між двома гравцями з різних мереж:** `46 мс` (Wi-Fi ПК та мобільний інтернет 4G)[cite: 5]
+
+![Gameplay Demo](./docs/demo.gif)
+*(Помістіть ваш GIF-запис геймплею у `docs/demo.gif` або замініть посилання)*[cite: 5]
+
+---
+
+Як грати
+
+1. Відкрийте посилання на гру в браузері на ПК або смартфоні[cite: 5].
+2. **Встановлення на телефон (PWA):** відкрийте сайт у мобільному браузері (Chrome / Safari) та натисніть *«Додати на головний екран»* (*«Install App»*) — гра запускатиметься у повноекранному режимі як нативний застосунок[cite: 5].
+3. Для спільної гри в одній кімнаті передайте другові посилання з параметром `roomId`, наприклад[cite: 5]:
+   `https://<YOUR-DEPLOY-URL>/?roomId=room1&name=Player2`
+4. **Керування:**
+   * `W` / `↑` — тяга (прискорення)
+   * `A` / `←` та `D` / `→` — поворот корабля
+   * `Space` — постріл
+   * Чат під ареною — обмін повідомленнями між гравцями кімнати
+
+---
+
+Схема архітектури
+
+```text
++-----------------------------------+          WSS / Binary Frames (30 Hz)          +-----------------------------------+
+|      Browser / Mobile PWA         |  ==========================================>  |      Node.js Game Server          |
+|                                   |     MSG_INPUT (7 bytes: seq + bitmask)        |                                   |
+|  - Canvas 2D Renderer (60 FPS)    |                                               |  - Single-Process Event Loop      |
+|  - Client-Side Prediction         |  <==========================================  |  - Authoritative Physics (30 Hz)  |
+|  - Server Reconciliation          |   MSG_SNAPSHOT (lastSeq + players float32)    |  - Spatial Hash Collisions        |
+|  - Object Pool (bullets/particles)|                                               |  - Pino JSON Logs & /metrics      |
+|  - Service Worker & Manifest      |  <----------------------------------------->  |  - Origin Check & IP Rate Limit   |
++-----------------------------------+            JSON Chat & Shutdown Events        +-----------------------------------+
+                                                                                                      |
+                                                                                          /health  /ready  /metrics

@@ -1,0 +1,4 @@
+[
+  { "id": "room1", "name": "Космічна Арена 1", "maxPlayers": 4 },
+  { "id": "room2", "name": "Тренувальна кімната", "maxPlayers": 2 }
+]

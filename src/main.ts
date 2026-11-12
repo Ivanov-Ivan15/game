@@ -10,6 +10,8 @@ const roomLabel = document.getElementById('room-label');
 if (roomLabel) roomLabel.textContent = roomId;
 
 const playersCountEl = document.getElementById('players-count');
+const connStatusEl = document.getElementById('conn-status');
+const lobbyBannerEl = document.getElementById('lobby-banner');
 const chatMessagesEl = document.getElementById('chat-messages');
 const chatForm = document.getElementById('chat-form') as HTMLFormElement | null;
 const chatInput = document.getElementById('chat-input') as HTMLInputElement | null;
@@ -53,46 +55,65 @@ window.addEventListener('keyup', (e: KeyboardEvent) => {
   if (e.code === 'Space' || k === ' ') keys.fire = false;
 });
 
-const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(`${wsProto}//${location.host}/ws?roomId=${encodeURIComponent(roomId)}&name=${encodeURIComponent(playerName)}`);
-ws.binaryType = 'arraybuffer';
+let ws: WebSocket;
 
-ws.onopen = () => {
-  (window as any).__GAME_STATE__.connected = true;
-};
+function connectToLobby() {
+  localShip.id = 0 as PlayerId;
+  remotePlayers = [];
+  if (connStatusEl) connStatusEl.textContent = 'connecting...';
 
-ws.onmessage = (event: MessageEvent) => {
-  if (event.data instanceof ArrayBuffer) {
-    const snapshot = decodeSnapshot(event.data);
-    if (snapshot.type === MSG_SNAPSHOT && snapshot.players.length > 0) {
-      if (localShip.id === 0) {
-        const maxId = Math.max(...snapshot.players.map((p: SnapshotPlayer) => p.id));
-        localShip.id = maxId as PlayerId;
+  const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${wsProto}//${location.host}/ws?roomId=${encodeURIComponent(roomId)}&name=${encodeURIComponent(playerName)}`);
+  ws.binaryType = 'arraybuffer';
+
+  ws.onopen = () => {
+    (window as any).__GAME_STATE__.connected = true;
+    if (connStatusEl) connStatusEl.textContent = wsProto === 'wss:' ? 'connected (wss)' : 'connected (ws)';
+    if (lobbyBannerEl) lobbyBannerEl.style.display = 'none';
+  };
+
+  ws.onmessage = (event: MessageEvent) => {
+    if (event.data instanceof ArrayBuffer) {
+      const snapshot = decodeSnapshot(event.data);
+      if (snapshot.type === MSG_SNAPSHOT && snapshot.players.length > 0) {
+        if (localShip.id === 0) {
+          const maxId = Math.max(...snapshot.players.map((p: SnapshotPlayer) => p.id));
+          localShip.id = maxId as PlayerId;
+        }
+        prediction.reconcile(localShip, snapshot);
+        remotePlayers = snapshot.players.filter((p: SnapshotPlayer) => p.id !== localShip.id);
+        if (playersCountEl) playersCountEl.textContent = String(snapshot.players.length);
       }
-      prediction.reconcile(localShip, snapshot);
-      remotePlayers = snapshot.players.filter((p: SnapshotPlayer) => p.id !== localShip.id);
-      if (playersCountEl) playersCountEl.textContent = String(snapshot.players.length);
-    }
-  } else if (typeof event.data === 'string') {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'chat' && chatMessagesEl) {
-        const line = document.createElement('div');
-        line.className = 'chat-line';
-        line.textContent = `${msg.sender}: ${msg.text}`;
-        chatMessagesEl.appendChild(line);
-        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    } else if (typeof event.data === 'string') {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'chat' && chatMessagesEl) {
+          const line = document.createElement('div');
+          line.className = 'chat-line';
+          line.textContent = `${msg.sender}: ${msg.text}`;
+          chatMessagesEl.appendChild(line);
+          chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        }
+      } catch {
       }
-    } catch {
     }
-  }
-};
+  };
+
+  ws.onclose = () => {
+    (window as any).__GAME_STATE__.connected = false;
+    if (connStatusEl) connStatusEl.textContent = 'reconnecting to lobby...';
+    if (lobbyBannerEl) lobbyBannerEl.style.display = 'block';
+    setTimeout(connectToLobby, 1500);
+  };
+}
+
+connectToLobby();
 
 if (chatForm && chatInput) {
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const text = chatInput.value.trim();
-    if (text && ws.readyState === WebSocket.OPEN) {
+    if (text && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'chat', text }));
       chatInput.value = '';
     }
@@ -102,7 +123,7 @@ if (chatForm && chatInput) {
 function step(): void {
   const dt = 1 / 30;
 
-  if (ws.readyState === WebSocket.OPEN && localShip.id > 0) {
+  if (ws && ws.readyState === WebSocket.OPEN && localShip.id > 0) {
     const input = prediction.createInput(keys.thrust, keys.left, keys.right, keys.fire);
     prediction.predict(localShip, input, dt);
 

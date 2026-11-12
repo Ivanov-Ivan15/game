@@ -3,7 +3,10 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lab 7 - Multiplayer Space Game</title>
+  <meta name="theme-color" content="#38bdf8" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+  <title>Multiplayer Space Game</title>
   <style>
     body {
       margin: 0;
@@ -19,13 +22,18 @@
     }
     #hud {
       font-size: 15px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
     }
     canvas {
       border: 2px solid #38bdf8;
       background: #000;
+      max-width: 96vw;
     }
     #chat-box {
       width: 800px;
+      max-width: 96vw;
       background: #1e293b;
       border: 1px solid #334155;
       padding: 8px;
@@ -56,11 +64,22 @@
       font-weight: bold;
       cursor: pointer;
     }
+    #lobby-banner {
+      display: none;
+      background: #ef4444;
+      color: #fff;
+      padding: 8px 16px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
+  <div id="lobby-banner">Зв'язок із сервером втрачено. Повернення в лобі...</div>
   <div id="hud">
-    Room: <span id="room-label">room1</span> | Players: <span id="players-count">1</span> | FPS: <span id="fps">60</span>
+    <span>Room: <strong id="room-label">room1</strong></span>
+    <span>Players: <strong id="players-count">1</strong></span>
+    <span>Status: <strong id="conn-status">connecting...</strong></span>
   </div>
   <canvas id="gameCanvas" width="800" height="600"></canvas>
   <div id="chat-box">
@@ -71,5 +90,10 @@
     </form>
   </div>
   <script type="module" src="/dist/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
 </body>
 </html>
